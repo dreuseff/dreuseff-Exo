@@ -171,6 +171,9 @@ export class SessionRuntime {
 		if (lastBlock && lastBlock.type === 'text') {
 			lastBlock.content += text;
 		} else {
+			if (text.trim() === '') {
+				return;
+			}
 			msg.blocks.push({ type: 'text', content: text });
 		}
 		msg._lastChunkKind = 'text';

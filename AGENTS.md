@@ -192,7 +192,7 @@ Exo is a VS Code extension that provides an interface to an autonomous AI agent 
     - `blocks`: `MessageBlock[]` — `{ type:'text', content }` | `{ type:'activity', toolCalls, reasoning, reasoningPhases, reasoningActive? }`.
     - `isError?`, `isStreaming?`, `isQueued?` (user-only, optimistic — reject follow-up or a message typed while a new session spawned).
     - `images?` (AttachedImage[], user-only).
-    - `_lastChunkKind?` (host runtime-only, not serialized): tracks last chunk type for reasoningPhases counter.
+    - `_lastChunkKind?` (host runtime-only, not serialized): tracks last chunk type for reasoningPhases counter. Streaming folds consecutive reasoning/tool chunks into ONE `activity` block (action line); `appendStreamChunk` drops empty/whitespace-only `agent_message_chunk` (some providers emit them between tool iterations) so they can't split one action line into several.
 
 - **`Plan` / `PlanItem`:** `id`, `title`, `description`, `status` (`'pending'|'in_progress'|'done'`).
 
