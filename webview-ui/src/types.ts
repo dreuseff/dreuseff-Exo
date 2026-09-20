@@ -72,6 +72,32 @@ export interface RecentSessionInfo {
 	active: boolean;
 }
 
+/**
+ * Payload of the host's `deleteSessionConfirm` request — the exact inventory of
+ * what deleting the session would destroy. The webview shows it in a modal and
+ * requires typing `project` verbatim before Delete unlocks.
+ */
+export interface DeleteSessionConfirm {
+	requestId: string;
+	sessionId: string;
+	/** Session ordinal number (the header badge). */
+	number: number;
+	/** Project name = worktree basename — the word the user must type. */
+	project: string;
+	/** Session branch (`exo-<N>`), empty when unresolvable. */
+	branch: string;
+	/** false → `main` unresolvable: commits could not be verified. */
+	mainResolved: boolean;
+	/** true → the git checks failed: nothing could be verified. */
+	checkFailed: boolean;
+	commitsCount: number;
+	commits: string[];
+	modifiedCount: number;
+	modified: string[];
+	untrackedCount: number;
+	untracked: string[];
+}
+
 /** Activity block (the only block the ActivityBar renders). */
 export type ActivityBlock = Extract<MessageBlock, { type: 'activity' }>;
 

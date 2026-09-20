@@ -310,6 +310,122 @@ export async function sessionHasUncommittedWork(worktreePath: string): Promise<b
 }
 
 /**
+ * A human-readable inventory of what a session deletion would destroy, so the
+ * webview can show EXACTLY what is at stake (commit subjects, changed and
+ * untracked files) instead of a vague "unsaved changes" confirm.
+ *
+ * Fail-safe by design: when git could not answer (`checkFailed`) or the main
+ * branch is unresolvable (`mainResolved === false`) the state is UNKNOWN —
+ * the caller must still ask for confirmation, never treat unknown as clean.
+ */
+export interface UnprotectedWorkInfo {
+	/** false → `main` could not be resolved: commits cannot be verified. */
+	mainResolved: boolean;
+	/** true → the git checks themselves failed: nothing could be verified. */
+	checkFailed: boolean;
+	commitsCount: number;
+	/** Commit subjects absent from main (capped list; count is exact). */
+	commits: string[];
+	modifiedCount: number;
+	/** Tracked modified/staged paths (capped list; count is exact). */
+	modified: string[];
+	untrackedCount: number;
+	/** Non-empty untracked paths (capped list; count is exact). */
+	untracked: string[];
+}
+
+/** How many entries per list the delete-confirmation modal shows. */
+const UNPROTECTED_LIST_CAP = 12;
+
+/**
+ * Collect the unprotected-work inventory for a worktree. Same dirty rules as
+ * `hasUncommittedChanges` (zero-byte untracked files are tool artifacts and
+ * ignored), plus the commit list from `sessionHasUncommittedWork`'s ancestry
+ * check, with the actual subjects for display.
+ */
+export async function describeUnprotectedWork(worktreePath: string): Promise<UnprotectedWorkInfo> {
+	const info: UnprotectedWorkInfo = {
+		mainResolved: true,
+		checkFailed: false,
+		commitsCount: 0,
+		commits: [],
+		modifiedCount: 0,
+		modified: [],
+		untrackedCount: 0,
+		untracked: [],
+	};
+	try {
+		const out = await runGit(['status', '--porcelain', '-z', '--untracked-files=all'], worktreePath);
+		const records = out.split('\0');
+		// In `-z` porcelain a rename/copy entry is followed by its source path
+		// as a separate NUL field — consume it so it is not counted twice.
+		let skipNext = false;
+		for (const record of records) {
+			if (!record) {
+				continue;
+			}
+			if (skipNext) {
+				skipNext = false;
+				continue;
+			}
+			if (record.startsWith('?? ')) {
+				const rel = record.slice(3);
+				const file = path.resolve(worktreePath, rel);
+				let keep = true;
+				try {
+					keep = (await fs.promises.stat(file)).size > 0;
+				} catch {
+					keep = true; // can't stat — treat as real work to be safe
+				}
+				if (!keep) {
+					continue;
+				}
+				info.untrackedCount++;
+				if (info.untracked.length < UNPROTECTED_LIST_CAP) {
+					info.untracked.push(rel);
+				}
+			} else {
+				if (record.startsWith('R') || record.startsWith('C')) {
+					skipNext = true;
+				}
+				const rel = record.slice(3);
+				info.modifiedCount++;
+				if (info.modified.length < UNPROTECTED_LIST_CAP) {
+					info.modified.push(rel);
+				}
+			}
+		}
+	} catch (err) {
+		info.checkFailed = true;
+		console.error('[Exo worktree] status check failed:', err);
+	}
+	const main = await resolveMainBranch(worktreePath);
+	if (!main) {
+		info.mainResolved = false;
+	} else {
+		try {
+			const out = await runGit(['log', '--format=%s', `${main}..HEAD`], worktreePath);
+			const subjects = out.split('\n').map((s) => s.trim()).filter((s) => s.length > 0);
+			info.commitsCount = subjects.length;
+			info.commits = subjects.slice(0, UNPROTECTED_LIST_CAP);
+		} catch (err) {
+			info.checkFailed = true;
+			console.error('[Exo worktree] commit-range check failed:', err);
+		}
+	}
+	return info;
+}
+
+/** True when deleting the worktree could destroy work or the state is unknown. */
+export function workNeedsConfirmation(info: UnprotectedWorkInfo): boolean {
+	return info.checkFailed
+		|| !info.mainResolved
+		|| info.commitsCount > 0
+		|| info.modifiedCount > 0
+		|| info.untrackedCount > 0;
+}
+
+/**
  * True when a path is inside the repo under `.exo/worktrees/` (a session
  * worktree created by Exo). Used to refuse removing anything outside our own
  * layout — a corrupted state must never be able to delete an arbitrary

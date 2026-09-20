@@ -1,0 +1,249 @@
+/* ============================================================
+   Delete Session Modal — destructive, name-typed confirmation
+   ============================================================ */
+
+.delete-modal-overlay {
+	position: fixed;
+	inset: 0;
+	z-index: 100;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: var(--ct-space-lg);
+	background: color-mix(in srgb, var(--ct-bg-primary) 65%, black 35%);
+	backdrop-filter: blur(2px);
+}
+
+.delete-modal {
+	display: flex;
+	flex-direction: column;
+	gap: var(--ct-space-md);
+	width: 100%;
+	max-width: 440px;
+	max-height: 82%;
+	overflow: hidden;
+	padding: var(--ct-space-lg);
+	background: var(--ct-dropdown-bg);
+	border: 1px solid var(--ct-status-danger-border);
+	border-radius: var(--ct-radius-lg);
+	box-shadow: var(--ct-shadow-md);
+}
+
+/* --- Header: the project name is the loud part --- */
+
+.delete-modal-header {
+	display: flex;
+	gap: var(--ct-space-md);
+	align-items: flex-start;
+}
+
+.delete-modal-header > i {
+	font-size: var(--ct-text-xl, 1.25rem);
+	color: var(--ct-status-danger);
+	margin-top: 2px;
+}
+
+.delete-modal-kicker {
+	font-size: var(--ct-text-xs);
+	font-weight: 700;
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+	color: var(--ct-status-danger-text);
+}
+
+.delete-modal-project {
+	font-family: var(--ct-font-mono);
+	font-size: 1.35rem;
+	font-weight: 700;
+	line-height: var(--ct-lh-tight);
+	color: var(--ct-text-emphasis, var(--ct-text-primary));
+	overflow-wrap: anywhere;
+}
+
+.delete-modal-sub {
+	margin-top: var(--ct-space-2xs);
+	font-size: var(--ct-text-xs);
+	color: var(--ct-text-secondary);
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: var(--ct-space-2xs);
+}
+
+.delete-modal-branch {
+	font-family: var(--ct-font-mono);
+	padding: 0 var(--ct-space-xs);
+	border: 1px solid var(--ct-border-subtle);
+	border-radius: var(--ct-radius-pill);
+	background: var(--ct-quote-bg);
+	color: var(--ct-text-secondary);
+}
+
+/* --- What-would-be-lost sections --- */
+
+.delete-modal-section {
+	display: flex;
+	flex-direction: column;
+	gap: var(--ct-space-2xs);
+	min-height: 0;
+}
+
+.delete-modal-section-title {
+	display: flex;
+	align-items: center;
+	gap: var(--ct-space-xs);
+	font-size: var(--ct-text-xs);
+	font-weight: 600;
+	color: var(--ct-text-primary);
+}
+
+.delete-modal-section-title > i {
+	width: 14px;
+	text-align: center;
+	color: var(--ct-status-danger);
+}
+
+.delete-modal-count {
+	margin-left: auto;
+	font-family: var(--ct-font-mono);
+	font-size: var(--ct-text-xs);
+	color: var(--ct-text-muted);
+}
+
+.delete-modal-list {
+	list-style: none;
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	max-height: 120px;
+	overflow-y: auto;
+	padding: var(--ct-space-xs) var(--ct-space-sm);
+	background: var(--ct-quote-bg);
+	border: 1px solid var(--ct-border-subtle);
+	border-radius: var(--ct-radius-sm);
+	font-size: var(--ct-text-xs);
+	line-height: var(--ct-lh-normal);
+	color: var(--ct-text-secondary);
+}
+
+.delete-modal-list.mono li {
+	font-family: var(--ct-font-mono);
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.delete-modal-list li {
+	overflow-wrap: anywhere;
+}
+
+.delete-modal-more {
+	color: var(--ct-text-muted);
+	font-style: italic;
+}
+
+.delete-modal-unknown {
+	display: flex;
+	gap: var(--ct-space-sm);
+	align-items: flex-start;
+	padding: var(--ct-space-sm);
+	border: 1px solid var(--ct-status-danger-border);
+	border-radius: var(--ct-radius-sm);
+	background: var(--ct-status-danger-bg);
+	font-size: var(--ct-text-xs);
+	color: var(--ct-text-primary);
+}
+
+.delete-modal-unknown > i {
+	color: var(--ct-status-danger);
+	margin-top: 2px;
+}
+
+/* --- Type-the-name verification --- */
+
+.delete-modal-verify {
+	display: flex;
+	flex-direction: column;
+	gap: var(--ct-space-xs);
+	padding-top: var(--ct-space-xs);
+	border-top: 1px solid var(--ct-border-subtle);
+}
+
+.delete-modal-verify-label {
+	font-size: var(--ct-text-xs);
+	color: var(--ct-text-secondary);
+}
+
+.delete-modal-verify-name {
+	font-family: var(--ct-font-mono);
+	font-weight: 700;
+	color: var(--ct-status-danger-text);
+}
+
+.delete-modal-input {
+	width: 100%;
+	padding: var(--ct-space-xs) var(--ct-space-sm);
+	font-family: var(--ct-font-mono);
+	font-size: var(--ct-text-sm);
+	color: var(--ct-text-primary);
+	background: var(--ct-bg-input);
+	border: 1px solid var(--ct-border-default);
+	border-radius: var(--ct-radius-sm);
+	outline: none;
+}
+
+.delete-modal-input:focus {
+	border-color: var(--ct-border-focus);
+}
+
+.delete-modal-input.ok {
+	border-color: var(--ct-status-success);
+}
+
+.delete-modal-input.bad {
+	border-color: var(--ct-status-danger);
+}
+
+/* --- Actions --- */
+
+.delete-modal-actions {
+	display: flex;
+	justify-content: flex-end;
+	gap: var(--ct-space-sm);
+}
+
+.delete-modal-btn {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--ct-space-xs);
+	padding: var(--ct-space-xs) var(--ct-space-md);
+	font-size: var(--ct-text-sm);
+	font-weight: 600;
+	border-radius: var(--ct-radius-sm);
+	border: 1px solid transparent;
+	cursor: pointer;
+}
+
+.delete-modal-btn.cancel {
+	background: var(--ct-btn-secondary-bg);
+	color: var(--ct-btn-secondary-fg);
+	border-color: var(--ct-border-default);
+}
+
+.delete-modal-btn.cancel:hover {
+	background: var(--ct-bg-hover);
+}
+
+.delete-modal-btn.delete {
+	background: var(--ct-status-danger);
+	color: var(--ct-bg-primary);
+}
+
+.delete-modal-btn.delete:hover:not(:disabled) {
+	filter: brightness(1.1);
+}
+
+.delete-modal-btn.delete:disabled {
+	opacity: 0.45;
+	cursor: not-allowed;
+}

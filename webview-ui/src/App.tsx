@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from 'preact/hooks';
-import type { ChatMessage, Plan, MessageBlock, CommandInfo, AgentInfo, AttachedImage, TabInfo, RecentSessionInfo, ChatLoadingInfo } from './types';
+import type { ChatMessage, Plan, MessageBlock, CommandInfo, AgentInfo, AttachedImage, TabInfo, RecentSessionInfo, ChatLoadingInfo, DeleteSessionConfirm } from './types';
 import { formatAgentLabel, useActiveModeColor } from './types';
 import { vscode } from './vscode';
 import { MessageList } from './components/MessageList';
@@ -9,6 +9,7 @@ import { SessionHeader } from './components/SessionHeader';
 import { ChatLoading } from './components/ChatLoading';
 import { ConfigRequired } from './components/ConfigRequired';
 import { WorkspaceModeRequired } from './components/WorkspaceModeRequired';
+import { DeleteSessionModal } from './components/DeleteSessionModal';
 import { resolveThemeId, setTheme, getThemeVersion, type ThemeKind } from './shiki';
 
 function readThemeKind(): ThemeKind {
@@ -57,6 +58,9 @@ export function App() {
 	const [configPath, setConfigPath] = useState<string | null>(null);
 	const [workspaceModeRequired, setWorkspaceModeRequired] = useState(false);
 	const [canMerge, setCanMerge] = useState(false);
+	// Host's destructive-delete confirmation (name-typed modal). Only one is
+	// live at a time — the host denies any earlier request when it sends a new one.
+	const [deleteConfirm, setDeleteConfirm] = useState<DeleteSessionConfirm | null>(null);
 
 	// Guard against streamChunk for a session that isn't the active one.
 	const activeSessionIdRef = useRef(activeSessionId);
@@ -139,6 +143,12 @@ export function App() {
 
 	const handleDeleteRecent = useCallback((sessionId: string) => {
 		vscode.postMessage({ type: 'deleteSession', sessionId });
+	}, []);
+
+	/** Relay the modal's decision to the host (the host owns the delete). */
+	const handleDeleteConfirmResult = useCallback((requestId: string, confirmed: boolean) => {
+		vscode.postMessage({ type: 'deleteSessionResult', requestId, confirmed });
+		setDeleteConfirm(null);
 	}, []);
 
 	useEffect(() => {
@@ -274,6 +284,24 @@ export function App() {
 					setCanMerge(Boolean(message.canMerge));
 					break;
 				}
+				case 'deleteSessionConfirm': {
+					setDeleteConfirm({
+						requestId: String(message.requestId ?? ''),
+						sessionId: String(message.sessionId ?? ''),
+						number: Number(message.number) || 0,
+						project: String(message.project ?? ''),
+						branch: String(message.branch ?? ''),
+						mainResolved: message.mainResolved !== false,
+						checkFailed: message.checkFailed === true,
+						commitsCount: Number(message.commitsCount) || 0,
+						commits: Array.isArray(message.commits) ? message.commits : [],
+						modifiedCount: Number(message.modifiedCount) || 0,
+						modified: Array.isArray(message.modified) ? message.modified : [],
+						untrackedCount: Number(message.untrackedCount) || 0,
+						untracked: Array.isArray(message.untracked) ? message.untracked : [],
+					});
+					break;
+				}
 				case 'updatePromptCapabilities': {
 					setPromptCapabilities({ image: Boolean(message.image) });
 					break;
@@ -359,6 +387,7 @@ export function App() {
 	}, [messages]);
 
 	return (
+		<>
 		<div class="chat-view" style={chatViewStyle}>
 			<div class="chat-header">
 				<SessionHeader
@@ -426,6 +455,10 @@ export function App() {
 				</div>
 			)}
 		</div>
+		{deleteConfirm && deleteConfirm.requestId && (
+			<DeleteSessionModal info={deleteConfirm} onResult={handleDeleteConfirmResult} />
+		)}
+		</>
 	);
 }
 

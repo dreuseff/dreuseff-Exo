@@ -85,6 +85,15 @@ export class WebviewMessageHandler {
 				}
 				break;
 			}
+			case 'deleteSessionResult': {
+				const requestId = message.requestId as string;
+				if (requestId) {
+					this.provider.resolveDeleteConfirmation(requestId, message.confirmed === true);
+				} else {
+					console.warn('[Exo] dropped deleteSessionResult without requestId', message);
+				}
+				break;
+			}
 			case 'openConfig': {
 				void vscode.commands.executeCommand('exo.openConfig');
 				break;

@@ -20,6 +20,7 @@ import {
 import { applyToolCallPatch, createToolCallInfo, type EditSpec } from '../acp/handlers/util';
 import {
 	createWorktree,
+	describeUnprotectedWork,
 	ensureGitExclude,
 	isGitRepository,
 	refreshScmStatus,
@@ -27,6 +28,9 @@ import {
 	removeWorktree,
 	resolveMainBranch,
 	sessionHasUncommittedWork,
+	workNeedsConfirmation,
+	worktreeBranchFromPath,
+	type UnprotectedWorkInfo,
 } from '../worktree';
 import {
 	WorkspaceFolderSwitcher,
@@ -238,6 +242,13 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 	/** In-flight create/load operations (loading tabs). Not persisted. */
 	private _pendingSessions = new Map<string, PendingSession>();
 	private _pendingCounter = 0;
+
+	/**
+	 * In-flight webview delete confirmations (`deleteSessionConfirm` →
+	 * `deleteSessionResult`), keyed by requestId. Only one is live at a time:
+	 * a new request rejects (denies) the previous one.
+	 */
+	private _pendingDeleteConfirms = new Map<string, (confirmed: boolean) => void>();
 
 	private _autoAllowPermissions = false;
 	private _readyHandled = false;
@@ -538,6 +549,12 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 	/** Webview ready: eager connect to the persisted active tab; tabs load lazily. */
 	public async handleReady(): Promise<void> {
 		this._workspaceRoot = this.resolveWorkspaceRoot();
+		// A fresh webview (first load or reload) has no modal on screen — deny any
+		// confirmation still awaiting a decision so the delete never hangs.
+		for (const resolve of this._pendingDeleteConfirms.values()) {
+			resolve(false);
+		}
+		this._pendingDeleteConfirms.clear();
 		// Defensive: make sure `.exo/` is hidden from git. If the root repo's
 		// status ran before the exclude was applied (e.g. the one-time workspace
 		// migration), the worktree files could otherwise show as untracked.
@@ -775,24 +792,23 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 		let confirmed = false;
 
 		if (isWorktree) {
-			// Warn before destroying work that only lives here (uncommitted
-			// changes or commits absent from main).
+			// Confirm IN THE WEBVIEW with the exact inventory of what would be
+			// lost (commit subjects, changed/untracked files) — the user must type
+			// the project name to proceed. Unknown git state (check failed or main
+			// unresolvable) also requires confirmation, never a silent delete.
+			let work: UnprotectedWorkInfo;
 			try {
-				const dirty = await sessionHasUncommittedWork(cwd);
-				if (dirty) {
-					const choice = await vscode.window.showWarningMessage(
-						'This session has uncommitted changes or commits not in main. Delete the session and its worktree anyway?',
-						{ modal: true },
-						'Delete',
-						'Cancel',
-					);
-					if (choice !== 'Delete') {
-						return;
-					}
-					confirmed = true;
-				}
+				work = await describeUnprotectedWork(cwd);
 			} catch (err) {
-				console.error('[Exo] worktree dirty-check failed (deleting anyway):', err);
+				console.error('[Exo] worktree work-inventory check failed:', err);
+				work = { mainResolved: false, checkFailed: true, commitsCount: 0, commits: [], modifiedCount: 0, modified: [], untrackedCount: 0, untracked: [] };
+			}
+			if (workNeedsConfirmation(work)) {
+				const accepted = await this.requestDeleteConfirmation(tabId, cwd, work);
+				if (!accepted) {
+					return;
+				}
+				confirmed = true;
 			}
 		}
 
@@ -869,6 +885,50 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 				this.freeNumber(freedNumber);
 			}
 		})();
+	}
+
+	/**
+	 * Ask the webview to confirm a destructive delete, showing exactly what
+	 * work would be lost. Resolves true only on an explicit, name-typed
+	 * confirmation (`deleteSessionResult`); a webview reload, a superseding
+	 * request or a cancel resolves false.
+	 */
+	private requestDeleteConfirmation(tabId: string, cwd: string, work: UnprotectedWorkInfo): Promise<boolean> {
+		// Only one confirmation is ever on screen - a newer request denies the old.
+		for (const resolve of this._pendingDeleteConfirms.values()) {
+			resolve(false);
+		}
+		this._pendingDeleteConfirms.clear();
+		const requestId = `del-${tabId}-${Date.now()}`;
+		return new Promise<boolean>((resolve) => {
+			this._pendingDeleteConfirms.set(requestId, resolve);
+			this.view?.webview.postMessage({
+				type: 'deleteSessionConfirm',
+				requestId,
+				sessionId: tabId,
+				number: sessionNumberFromTabId(tabId),
+				project: path.basename(cwd),
+				branch: worktreeBranchFromPath(cwd) ?? '',
+				mainResolved: work.mainResolved,
+				checkFailed: work.checkFailed,
+				commitsCount: work.commitsCount,
+				commits: work.commits,
+				modifiedCount: work.modifiedCount,
+				modified: work.modified,
+				untrackedCount: work.untrackedCount,
+				untracked: work.untracked,
+			});
+		});
+	}
+
+	/** Apply the webview's decision for a `deleteSessionConfirm` request. */
+	public resolveDeleteConfirmation(requestId: string, confirmed: boolean): void {
+		const resolve = this._pendingDeleteConfirms.get(requestId);
+		if (!resolve) {
+			return; // stale or already denied (reload / superseded)
+		}
+		this._pendingDeleteConfirms.delete(requestId);
+		resolve(confirmed);
 	}
 
 	private async deleteSessionViaTempAgent(agentSessionId: string, cwd: string): Promise<void> {

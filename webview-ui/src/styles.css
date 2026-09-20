@@ -12,4 +12,5 @@
 @import './styles/plan.css';
 @import './styles/session-header.css';
 @import './styles/header.css';
+@import './styles/delete-modal.css';
 @import 'katex/dist/katex.min.css';
