@@ -255,11 +255,23 @@ export function resolveThemeId(name: string | null, kind: ThemeKind): string {
 export function setTheme(id: string): void {
 	currentThemeId = id;
 	themeVersion++;
+	// Cached HTML was rendered with the old theme — drop it.
+	highlightCache.clear();
 }
 
 export function getThemeVersion(): number {
 	return themeVersion;
 }
+
+/**
+ * Highlight-result cache, keyed by theme|lang|code. Without it, every
+ * streaming re-render (≤ every 50ms) re-highlighted EVERY code block of the
+ * streaming message with the pure-JS regex engine — the dominant CPU cost of
+ * a turn (O(message length) per chunk → O(n²) per turn). Finished blocks now
+ * highlight exactly once. FIFO eviction, bounded size.
+ */
+const highlightCache = new Map<string, string>();
+const HIGHLIGHT_CACHE_MAX = 200;
 
 export function highlightCode(code: string, lang: string | undefined): string {
 	let resolvedLang = lang ? (lang.toLowerCase().trim() || '') : '';
@@ -267,9 +279,22 @@ export function highlightCode(code: string, lang: string | undefined): string {
 	if (!resolvedLang || (!loadedLangs.has(resolvedLang) && resolvedLang !== 'plaintext')) {
 		return `<pre data-lang="${escapeAttr(resolvedLang || 'text')}"><code>${escapeHtml(code)}</code></pre>`;
 	}
+	const key = `${currentThemeId}|${resolvedLang}|${code}`;
+	const cached = highlightCache.get(key);
+	if (cached !== undefined) {
+		return cached;
+	}
 	try {
-		const html = highlighter.codeToHtml(code, { lang: resolvedLang, theme: currentThemeId });
-		return html.replace(/<pre /, `<pre data-lang="${escapeAttr(resolvedLang)}" `);
+		const html = highlighter.codeToHtml(code, { lang: resolvedLang, theme: currentThemeId })
+			.replace(/<pre /, `<pre data-lang="${escapeAttr(resolvedLang)}" `);
+		if (highlightCache.size >= HIGHLIGHT_CACHE_MAX) {
+			const oldest = highlightCache.keys().next();
+			if (!oldest.done) {
+				highlightCache.delete(oldest.value);
+			}
+		}
+		highlightCache.set(key, html);
+		return html;
 	} catch {
 		return `<pre data-lang="${escapeAttr(resolvedLang)}"><code>${escapeHtml(code)}</code></pre>`;
 	}

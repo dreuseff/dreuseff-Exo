@@ -1,14 +1,14 @@
 import { useRef, useEffect, useState, useCallback, useMemo } from 'preact/hooks';
 import { memo } from 'preact/compat';
 import type { VNode, CSSProperties } from 'preact';
-import { marked, type TokenizerAndRendererExtension } from 'marked';
+import { marked, type TokenizerAndRendererExtension, type Tokens } from 'marked';
 import markedKatex from 'marked-katex-extension';
 import DOMPurify from 'dompurify';
 import type { ChatMessage, ToolCallInfo, ActivityBlock } from '../types';
 import { EMPTY_RESPONSE } from '../types';
 import { vscode } from '../vscode';
 import { highlightCode } from '../shiki';
-import { escapeHtml } from '../escape';
+import { escapeHtml, escapeAttr } from '../escape';
 
 // Configure marked: GFM + soft line breaks (models emit single newlines as
 // visual breaks; breaks:true keeps them instead of collapsing to spaces).
@@ -20,9 +20,33 @@ marked.setOptions({
 // Syntax highlighting via Shiki (TextMate grammars + active-theme token
 // colors). The renderer runs synchronously inside marked.parse, producing
 // <pre class="shiki ..."> with inline style colors that match the editor.
+//
+// Streaming guard: while a STREAMING text block is parsed, a still-OPEN
+// trailing ``` fence is rendered as a plain <pre> instead of highlighted —
+// its content grows on every chunk, so no cache can help and re-highlighting
+// it ~20×/s was the dominant CPU cost of a turn. As soon as the fence closes
+// (or streaming ends) the block re-renders through Shiki and gets cached.
+let parsingStreamingBlock = false;
+
+function isUnclosedFence(raw: string): boolean {
+	const open = /^(`{3,})[^\n]*\n/.exec(raw);
+	if (!open) {
+		// Only a bare fence marker so far (nothing to highlight yet) → plain;
+		// an indented-style code block is never "open" → highlight normally.
+		return /^`{3,}/.test(raw);
+	}
+	// A closed fence always terminates the token's raw text (the lexer stops
+	// at the first closing marker), so testing the tail is exact.
+	const close = new RegExp(`\\n {0,3}${open[1]}[ \t]*[\\r\n]*$`);
+	return !close.test(raw);
+}
+
 marked.use({
 	renderer: {
-		code({ text, lang }: { text: string; lang?: string }) {
+		code({ text, lang, raw }: { text: string; lang?: string; raw?: string }) {
+			if (parsingStreamingBlock && typeof raw === 'string' && isUnclosedFence(raw)) {
+				return `<pre data-lang="${escapeAttr(lang || 'text')}"><code>${escapeHtml(text)}</code></pre>`;
+			}
 			return highlightCode(text, lang);
 		},
 	},
@@ -226,10 +250,13 @@ interface Props {
 function renderMarkdown(content: string, onClick: (e: MouseEvent) => void, isStreaming: boolean) {
 	if (!content.trim() || content === EMPTY_RESPONSE) return null;
 	let rawHtml: string;
+	parsingStreamingBlock = isStreaming;
 	try {
 		rawHtml = marked.parse(sanitizeInlineMath(content)) as string;
 	} catch {
 		return <div class="md-content" onClick={onClick}>{escapeHtml(content)}</div>;
+	} finally {
+		parsingStreamingBlock = false;
 	}
 	// Sanitize before injecting: marked v18 does not strip HTML by default.
 	// Allow our own data-* attrs used by file links and the copy button
@@ -260,6 +287,34 @@ function renderMarkdown(content: string, onClick: (e: MouseEvent) => void, isStr
 		/>
 	);
 }
+
+/* ============================================================
+   MarkdownBlock — memoized per-block markdown render
+   ------------------------------------------------------------
+   The markdown pipeline (sanitize → marked+Shiki → DOMPurify → HTML
+   post-process → innerHTML swap) is O(content). During streaming the host
+   pushes a new blocks snapshot every ~50ms, but only the LAST text block of
+   the message actually changes. Memoizing per block on its own content means
+   unchanged blocks skip the whole pipeline (and their DOM subtree stays
+   untouched); only the growing tail block re-parses.
+
+   themeVersion / linkVersion are in the props solely for memo invalidation —
+   the render itself reads the live theme id and resolved-links map.
+   ============================================================ */
+
+interface MarkdownBlockProps {
+	content: string;
+	isLastAndStreaming: boolean;
+	themeVersion: number;
+	linkVersion: number;
+	onClick: (e: MouseEvent) => void;
+}
+
+const MarkdownBlock = memo(function MarkdownBlock({ content, isLastAndStreaming, themeVersion, linkVersion, onClick }: MarkdownBlockProps) {
+	void themeVersion;
+	void linkVersion;
+	return renderMarkdown(content, onClick, isLastAndStreaming);
+});
 
 /* ============================================================
    Inline user-mention chips
@@ -929,7 +984,7 @@ function PermissionCard({ tc }: { tc: ToolCallInfo }) {
 
 export const MessageBubble = memo(function MessageBubble({ message, themeVersion, showRetry, onRetry }: Props) {
 	const isStreaming = message.isStreaming ?? false;
-	const [, setFileLinkVersion] = useState(0);
+	const [fileLinkVersion, setFileLinkVersion] = useState(0);
 	const resolveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
 	useEffect(() => {
@@ -1071,11 +1126,16 @@ export const MessageBubble = memo(function MessageBubble({ message, themeVersion
 								</div>
 							);
 						}
-						const isLastAndStreaming = isStreaming && i === lastIndex;
-						const md = renderMarkdown(block.content, handleContentClick, isLastAndStreaming);
+						const mdProps = {
+							content: block.content,
+							isLastAndStreaming: isStreaming && i === lastIndex,
+							themeVersion,
+							linkVersion: fileLinkVersion,
+							onClick: handleContentClick,
+						};
 						return isCopyAnchor
-							? <div key={i} class="text-anchor">{md}{copyBtnNode}</div>
-							: md;
+							? <div key={i} class="text-anchor"><MarkdownBlock {...mdProps} />{copyBtnNode}</div>
+							: <MarkdownBlock key={i} {...mdProps} />;
 					}
 					if (block.type === 'activity') {
 						return <ActivityBar key={i} activity={block} isStreaming={isStreaming} isLast={i === lastIndex} />;
